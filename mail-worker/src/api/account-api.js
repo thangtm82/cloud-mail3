@@ -1,11 +1,17 @@
 import app from '../hono/hono';
 import accountService from '../service/account-service';
+import signatureService from '../service/signature-service';
 import result from '../model/result';
 import userContext from '../security/user-context';
 
 app.get('/account/list', async (c) => {
 	const list = await accountService.list(c, c.req.query(), userContext.getUserId(c));
 	return c.json(result.ok(list));
+});
+
+app.get('/account/signature', async (c) => {
+	const signature = await signatureService.get(c, c.req.query(), userContext.getUserId(c));
+	return c.json(result.ok(signature));
 });
 
 app.delete('/account/delete', async (c) => {
@@ -21,6 +27,11 @@ app.post('/account/add', async (c) => {
 app.put('/account/setName', async (c) => {
 	await accountService.setName(c, await c.req.json(), userContext.getUserId(c));
 	return c.json(result.ok());
+});
+
+app.put('/account/signature', async (c) => {
+	const signature = await signatureService.set(c, await c.req.json(), userContext.getUserId(c));
+	return c.json(result.ok(signature));
 });
 
 app.put('/account/setAllReceive', async (c) => {
