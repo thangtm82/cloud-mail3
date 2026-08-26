@@ -98,6 +98,7 @@ import {h, nextTick, onMounted, onUnmounted, reactive, ref, toRaw, computed} fro
 import {Icon} from "@iconify/vue";
 import {useUserStore} from "@/store/user.js";
 import {emailSend} from "@/request/email.js";
+import {accountGetSignature} from "@/request/account.js";
 import {isEmail} from "@/utils/verify-utils.js";
 import {useAccountStore} from "@/store/account.js";
 import {useEmailStore} from "@/store/email.js";
@@ -191,7 +192,7 @@ function chooseContact() {
   const contactList = contactsTabRef.value.getSelectionRows().map(item => item.email);
   contactList.forEach(item => {
     if (!form.receiveEmail.includes(item)) {
-      form.receiveEmail.push(item);
+      form.receiveEmail.push(item)
     }
   })
 
@@ -258,7 +259,6 @@ function clearContent() {
   }).then(() => {
     resetForm()
   })
-
 }
 
 function delAtt(index) {
@@ -412,6 +412,7 @@ function resetForm() {
   form.receiveEmail = []
   form.subject = ''
   form.content = ''
+  form.text = ''
   form.manyType = null
   form.attachments = []
   form.sendType = ''
@@ -421,6 +422,7 @@ function resetForm() {
   backReply.subject = ''
   backReply.receiveEmail = []
   backReply.sendType = ''
+  defValue.value = ''
   editor.value.clearEditor()
 }
 
@@ -433,6 +435,31 @@ function focusChange() {
   if (selectStatus) openSelect()
 }
 
+async function loadSignature(accountId) {
+  try {
+    const data = await accountGetSignature(accountId)
+    if (Number(data.signatureEnabled) !== 1 || !data.signature) return ''
+    return `<div data-cloudmail-signature="true">${data.signature}</div>`
+  } catch (e) {
+    console.warn('Unable to load mailbox signature', e)
+    return ''
+  }
+}
+
+function hasSignature(content) {
+  return (content || '').includes('data-cloudmail-signature=')
+}
+
+function hasMeaningfulContentWithoutSignature(content) {
+  if (!content) return false
+  const root = document.createElement('div')
+  root.innerHTML = content
+  root.querySelectorAll('[data-cloudmail-signature="true"]').forEach(item => item.remove())
+  const text = (root.textContent || '').replace(/\u00a0/g, ' ').trim()
+  if (text) return true
+  return Boolean(root.querySelector('img,table,hr,video,audio'))
+}
+
 function openForward(email) {
   resetForm();
 
@@ -443,11 +470,11 @@ function openForward(email) {
 
   defValue.value = ''
 
-  setTimeout(() => {
+  setTimeout(async () => {
     defValue.value = `
       ${formatImage(email.content) || `<pre style="font-family: inherit;word-break: break-word;white-space: pre-wrap;margin: 0">${email.text}</pre>`}
     `
-    open()
+    await open()
 
     nextTick(() => {
       backReply.content = editor.value.getContent()
@@ -476,7 +503,7 @@ function openReply(email) {
 
   defValue.value = ''
 
-  setTimeout(() => {
+  setTimeout(async () => {
     defValue.value = `
     <div></div>
     <div>
@@ -488,7 +515,7 @@ function openReply(email) {
           ${formatImage(email.content) || `<pre style="font-family: inherit;word-break: break-word;white-space: pre-wrap;margin: 0">${email.text}</pre>`}
       </article>
     </blockquote>`
-    open()
+    await open()
 
     nextTick(() => {
       backReply.content = editor.value.getContent()
@@ -506,7 +533,7 @@ function formatImage(content) {
   return content.replace(/{{domain}}/g, toOssDomain(domain) + '/');
 }
 
-function open() {
+async function open() {
   if (!accountStore.currentAccount.email) {
     form.sendEmail = userStore.user.email;
     form.accountId = userStore.user.account.accountId;
@@ -516,8 +543,18 @@ function open() {
     form.accountId = accountStore.currentAccount.accountId;
     form.name = accountStore.currentAccount.name;
   }
+
+  const signature = await loadSignature(form.accountId)
+  if (signature && !hasSignature(defValue.value)) {
+    if (form.sendType === 'reply' || form.sendType === 'forward') {
+      defValue.value = `<div></div>${signature}<div><br></div>${defValue.value || ''}`
+    } else if (!form.content) {
+      defValue.value = `<div></div>${signature}`
+    }
+  }
+
   show.value = true;
-  editor.value.focus()
+  nextTick(() => editor.value.focus())
 }
 
 function openDraft(draft) {
@@ -546,8 +583,9 @@ function close() {
 
   if (selectStatus) openSelect();
 
+  const editorContent = editor.value.getContent();
   if (!form.content) {
-    form.content = editor.value.getContent();
+    form.content = editorContent;
   }
 
   if (form.draftId) {
@@ -557,7 +595,7 @@ function close() {
     return;
   }
 
-  if (!(form.content || form.subject || form.receiveEmail.length > 0)) {
+  if (!(hasMeaningfulContentWithoutSignature(editorContent) || form.subject || form.receiveEmail.length > 0)) {
     show.value = false
     resetForm()
     return;
@@ -565,7 +603,7 @@ function close() {
 
   if (backReply.sendType === 'reply' || backReply.sendType === 'forward') {
     let subjectFlag = form.subject === backReply.subject
-    let contentFlag = editor.value.getContent() === backReply.content
+    let contentFlag = editorContent === backReply.content
     let receiveFlag = form.receiveEmail.length === 1 && form.receiveEmail[0] === backReply.receiveEmail[0]
     if (backReply.sendType === 'forward' && form.receiveEmail.length === 0) {
       receiveFlag = true;
