@@ -25,6 +25,7 @@
                 <template #dropdown>
                   <el-dropdown-menu>
                     <el-dropdown-item v-if="hasPerm('email:send')" @click="openSetName(item)">{{ $t('rename') }}</el-dropdown-item>
+                    <el-dropdown-item v-if="hasPerm('email:send')" @click="openSignature(item)">Signature</el-dropdown-item>
                     <el-dropdown-item v-if="item.accountId !== userStore.user.account.accountId" @click="setAsTop(item, index)">{{ $t('pin') }}</el-dropdown-item>
                     <el-dropdown-item v-if="item.accountId !== userStore.user.account.accountId && hasPerm('account:delete')"
                                       @click="remove(item)">{{ $t('delete') }}
@@ -123,16 +124,40 @@
         </el-button>
       </div>
     </el-dialog>
+    <el-dialog v-model="signatureShow" class="signature-dialog" :title="`Signature — ${signatureAccount?.email || ''}`">
+      <div class="signature-box">
+        <div class="signature-toggle">
+          <span>Enable signature</span>
+          <el-switch v-model="signatureEnabled"/>
+        </div>
+        <div class="signature-editor">
+          <tinyEditor
+              v-if="signatureShow"
+              :def-value="signatureValue"
+              editor-id="signature-editor"
+              ref="signatureEditor"
+              @change="signatureChange"
+          />
+        </div>
+        <div class="signature-actions">
+          <el-button @click="signatureShow = false">{{ $t('cancel') }}</el-button>
+          <el-button type="primary" :loading="signatureLoading" @click="saveSignature">{{ $t('save') }}</el-button>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 <script setup>
 import {Icon} from "@iconify/vue";
 import {computed, nextTick, reactive, ref, watch} from "vue";
+import tinyEditor from '@/components/tiny-editor/index.vue'
 import {
   accountList,
   accountAdd,
   accountDelete,
   accountSetName,
+  accountGetSignature,
+  accountSetSignature,
   accountSetAllReceive,
   accountSetAsTop
 } from "@/request/account.js";
@@ -164,6 +189,12 @@ const setNameLoading = ref(false)
 const accountName = ref(null)
 const addRef = ref({})
 const scrollbarRef = ref({})
+const signatureShow = ref(false)
+const signatureLoading = ref(false)
+const signatureValue = ref('')
+const signatureEnabled = ref(false)
+const signatureEditor = ref({})
+const signatureAccount = ref(null)
 let account = null
 let turnstileId = null
 const botJsError = ref(false)
@@ -270,6 +301,40 @@ function openSetName(accountItem) {
   accountName.value = accountItem.name
   account = accountItem
   setNameShow.value = true
+}
+
+function openSignature(accountItem) {
+  signatureAccount.value = accountItem
+  signatureLoading.value = true
+  accountGetSignature(accountItem.accountId).then(data => {
+    signatureValue.value = data.signature || ''
+    signatureEnabled.value = Number(data.signatureEnabled) === 1
+    signatureShow.value = true
+  }).finally(() => {
+    signatureLoading.value = false
+  })
+}
+
+function signatureChange(content) {
+  signatureValue.value = content
+}
+
+function saveSignature() {
+  if (!signatureAccount.value || signatureLoading.value) return
+  const content = signatureEditor.value?.getContent?.() ?? signatureValue.value
+  signatureLoading.value = true
+  accountSetSignature(signatureAccount.value.accountId, content, signatureEnabled.value ? 1 : 0).then(data => {
+    signatureValue.value = data.signature || ''
+    signatureEnabled.value = Number(data.signatureEnabled) === 1
+    signatureShow.value = false
+    ElMessage({
+      message: t('saveSuccessMsg'),
+      type: 'success',
+      plain: true,
+    })
+  }).finally(() => {
+    signatureLoading.value = false
+  })
 }
 
 function setAllReceive(account) {
@@ -648,6 +713,33 @@ path[fill="#ffdda1"] {
     width: calc(100% - 40px) !important;
     margin-right: 20px !important;
     margin-left: 20px !important;
+  }
+}
+
+:deep(.el-dialog.signature-dialog) {
+  width: min(760px, calc(100% - 40px)) !important;
+}
+
+.signature-box {
+  .signature-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
+  .signature-editor {
+    height: 360px;
+    border: 1px solid var(--el-border-color);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .signature-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 12px;
   }
 }
 
